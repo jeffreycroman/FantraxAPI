@@ -28,6 +28,26 @@ class DraftPick:
     def __str__(self):
         return f"From: {self.from_team.name} To: {self.to_team.name} Pick: {self.year}, Round {self.round} ({self.owner.name})"
 
+class BudgetObj:
+    """ Represents a single Budget Amount.
+
+        Attributes:
+            from_team (:class:`~Team`]): Team Traded From.
+            to_team (:class:`~Team`]): Team Traded To.
+            amount (str): Budget Amount
+
+    """
+    def __init__(self, api, data):
+        self._api = api
+        self.from_team = self._api.team(list(filter(lambda date: date['key'] == 'from', data['cells']))[0]['teamId'])
+        self.to_team = self._api.team(list(filter(lambda date: date['key'] == 'to', data['cells']))[0]['teamId'])
+        self.amount = f"{data['budgetAmountTradeObj']['budget']} FAAB"
+
+    def __repr__(self):
+        return self.__str__()
+
+    def __str__(self):
+        return f"From: {self.from_team.name} To: {self.to_team.name} Budget Amount: {self.amount}"
 
 class Matchup:
     """ Represents a single Matchup.
@@ -314,6 +334,106 @@ class Trade:
     def __str__(self):
         return "\n".join([str(m) for m in self.moves])
 
+class ExecutedDraftPick:
+    """ Represents a single Draft Pick.
+
+        Attributes:
+            from_team (:class:`~Team`]): Team Traded From.
+            to_team (:class:`~Team`]): Team Traded To.
+            round (int): Draft Pick Round.
+            year (int): Draft Pick Year.
+
+    """
+    def __init__(self, api, data):
+        self._api = api
+        self.from_team = self._api.team(list(filter(lambda date: date['key'] == 'from', data['cells']))[0]['teamId'])
+        self.to_team = self._api.team(list(filter(lambda date: date['key'] == 'to', data['cells']))[0]['teamId'])
+        self.round = data["draftPickObj"]["roundInfo"]
+        self.year = data["draftPickObj"]["year"]
+
+    def __repr__(self):
+        return self.__str__()
+
+    def __str__(self):
+        return f"From: {self.from_team.name} To: {self.to_team.name} Pick: {self.year}, Round {self.round}"
+
+class ExecutedTrade:
+    """ Represents a single Executed Trade.
+
+        Attributes:
+            executed (str): Datetime Trade Executed.
+            moves (List[Union(:class:`~DraftPick`, :class:`~TradePlayer`)]): Team Short Name.
+
+    """
+    def __init__(self, api, data):
+        self._api = api
+
+        self.trade_id = data["txSetId"]
+        self.executed = datetime.strptime(list(filter(lambda date: date['key'] == 'date', data['cells']))[0]['content'], "%a %b %d, %Y, %I:%M%p")
+        self.team = self._api.team(data["cells"][0]["teamId"])
+        self.count = data["numInGroup"]
+        self.players = [self.decision(data)]
+
+    def decision(self,data):
+        if 'budgetAmountTradeObj' in data:
+            return BudgetObj(self._api, data)
+        elif 'draftPickObj' in data:
+            return ExecutedDraftPick(self._api, data)
+        else:
+            return TradedPlayer(self._api, data)
+
+    def update(self, data):
+        if data["txSetId"] == self.trade_id:
+            self.players.append(self.decision(data))
+
+    def __repr__(self):
+        return self.__str__()
+
+    def __str__(self):
+        return str(self.players)
+
+class TradedPlayer:
+    """ Represents a single Traded Player.
+
+        Attributes:
+            from_team (:class:`~Team`]): Team Traded From.
+            to_team (:class:`~Team`]): Team Traded To.
+            name (str): TradePlayer Name.
+            short_name (str): TradePlayer Short Name.
+            team_name (str): Team Name.
+            team_short_name (str): Team Short Name.
+            pos (str): TradePlayer Position.
+
+    """
+    def __init__(self, api, data):
+        self._api = api
+        self.from_team = self._api.team(list(filter(lambda date: date['key'] == 'from', data['cells']))[0]['teamId'])
+        self.to_team = self.to_helper(data)
+        self.name = data["scorer"]["name"]
+        self.short_name = data["scorer"]["shortName"]
+        self.team_name = data["scorer"]["teamName"]
+        self.team_short_name = data["scorer"]["teamShortName"]
+        self.pos = data["scorer"]["posShortNames"]
+
+    def to_helper(self, data):
+        if list(filter(lambda date: date['key'] == 'to', data['cells']))[0]['content'] == '(Drop)':
+            return '(Drop)'
+        else:
+            return self._api.team(list(filter(lambda date: date['key'] == 'to', data['cells']))[0]['teamId'])
+
+    def __repr__(self):
+        return self.__str__()
+
+    def __str__(self):
+        return f"From: {self.from_team.name} To: {self.to_team.name} Player: {self.name} {self.pos} - {self.team_short_name}"
+
+    def __getitem__(self, key):
+        if key == 'executed':
+            return self.executed
+        elif key == 'players':
+            return self.players
+        else:
+            raise KeyError(f"'{key}' is not a valid attribute for ExecutedTrade")
 
 class TradeBlock:
     """ Represents a single Trade Block.
@@ -399,7 +519,7 @@ class Transaction:
         self._api = api
         self.id = data["txSetId"]
         self.team = self._api.team(data["cells"][0]["teamId"])
-        self.date = datetime.strptime(data["cells"][1]["content"], "%a %b %d, %Y, %I:%M%p")
+        self.date = datetime.strptime(list(filter(lambda date: date['key'] == 'date', data['cells']))[0]['content'], "%a %b %d, %Y, %I:%M%p")
         self.count = data["numInGroup"]
         self.players = [Player(self._api, data["scorer"], data["claimType"] if data["transactionCode"] == "CLAIM" else data["transactionCode"])]
         self.finalized = self.count == 1

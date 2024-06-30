@@ -4,7 +4,7 @@ from requests import Session
 from json.decoder import JSONDecodeError
 from requests.exceptions import RequestException
 from fantraxapi.exceptions import FantraxException
-from fantraxapi.objs import ScoringPeriod, Team, Standings, Trade, TradeBlock, Position, Transaction, Roster
+from fantraxapi.objs import ScoringPeriod, Team, Standings, Trade, TradeBlock, Position, Transaction, Roster, ExecutedTrade, BudgetObj
 
 logger = logging.getLogger(__name__)
 
@@ -137,6 +137,26 @@ class FantraxAPI:
             else:
                 transactions.append(transaction)
         return transactions
+
+    def trades(self, count=100) -> List[ExecutedTrade]:
+        response = self._request("getTransactionDetailsHistory", view="TRADE", maxResultsPerPage=str(count), )
+        trade_nums = []
+        trades = []
+        update = False
+        for row in response["table"]["rows"]:
+            if row['txSetId'] not in trade_nums:
+                trade_nums.append(row['txSetId'])
+        for trade_num in trade_nums:
+            i = 0
+            for row in response['table']['rows']:
+                if row['txSetId'] == trade_num:
+                    if i == 0:
+                        trade = ExecutedTrade(self, row)
+                    else:
+                        trade.update(row)
+                    i+=1
+            trades.append(trade)
+        return trades
 
     def max_goalie_games_this_week(self) -> int:
         response = self._request("getTeamRosterInfo", teamId=self.teams[0].team_id, view="GAMES_PER_POS")
